@@ -1,3 +1,5 @@
+
+
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -14,7 +16,7 @@ import random
 # Import our custom modules
 from utils.data_simulator import EEGDataSimulator
 from utils.preprocessor import EEGPreprocessor
-from utils.advanced_feature import ImpactVisualizer, DemoManager
+from utils.advanced_features import ImpactVisualizer, DemoManager
 
 # Simple fallback for Google TTS
 class DemoTextToSpeech:
@@ -137,14 +139,20 @@ def main():
 
     if 'app' not in st.session_state:
         st.session_state.app = NeuroVoiceApp()
-        # Always load the single existing file 'emotions.csv' from the data folder
+        # Note: The emotions.csv file contains text data, not EEG signals
+        # We'll use simulated EEG data instead for the demo
         data_path = os.path.join('data', 'emotions.csv')
         if os.path.exists(data_path):
-            df = pd.read_csv(data_path, header=None)
-            eeg_data = df.values.flatten()
-            st.session_state.eeg_data = eeg_data
+            try:
+                # Since emotions.csv contains text data (not EEG), we'll generate synthetic EEG data
+                # This is more appropriate for the brain-to-speech interface demo
+                st.session_state.eeg_data = st.session_state.app.simulator.generate_medical_eeg_data(30, 'HELP')
+                st.info("💡 Using simulated EEG data optimized for medical brain-speech interface")
+            except Exception as e:
+                st.warning(f"Using fallback simulated data: {e}")
+                st.session_state.eeg_data = st.session_state.app.simulator.generate_medical_eeg_data(30, 'HELP')
         else:
-            st.session_state.eeg_data = st.session_state.app.simulator.generate_medical_eeg_data(10000, 'HELP')
+            st.session_state.eeg_data = st.session_state.app.simulator.generate_medical_eeg_data(30, 'HELP')
         st.session_state.predictions = []
         st.session_state.impact_metrics = {
             'patients_helped': 3,
@@ -170,7 +178,7 @@ def main():
         st.metric("Communications", st.session_state.impact_metrics['successful_communications'])
         
         st.markdown("---")
-        st.subheader("⚙ Settings")
+        st.subheader("⚙️ Settings")
         simulation_speed = st.slider("Simulation Speed", 1, 10, 3)
         sensitivity = st.slider("AI Sensitivity", 0.1, 1.0, 0.7)
         
@@ -178,7 +186,7 @@ def main():
             st.session_state.simulating = True
             st.rerun()
         
-        if st.button("⏸ Pause Demo"):
+        if st.button("⏸️ Pause Demo"):
             st.session_state.simulating = False
             st.rerun()
     
@@ -197,12 +205,46 @@ def main():
             with col1:
                 st.markdown("#### 🧠 Real-time Brain Activity")
                 
-                # Get current EEG window
+                # Get current EEG window with improved bounds checking
                 window_size = 256
                 current_pos = st.session_state.current_pos
+                eeg_data_len = len(st.session_state.eeg_data)
+                
+                # Ensure we don't go beyond data bounds
+                if current_pos + window_size >= eeg_data_len:
+                    st.session_state.current_pos = 0  # Reset to beginning
+                    current_pos = 0
+                
                 # Use a smaller step for smoother transition
                 step_size = window_size // 16  # 1/16th window for high overlap
                 eeg_window = st.session_state.eeg_data[current_pos:current_pos + window_size]
+
+                # Ensure we have enough data points
+                if len(eeg_window) < window_size:
+                    # Pad with the last available data point if needed
+                    padding = window_size - len(eeg_window)
+                    if len(eeg_window) > 0:
+                        eeg_window = np.concatenate([eeg_window, np.full(padding, eeg_window[-1])])
+                    else:
+                        eeg_window = np.random.randn(window_size) * 10
+
+                # Ensure data is numeric and handle any issues
+                try:
+                    eeg_window = np.array(eeg_window, dtype=np.float64)
+                    # Remove any NaN or inf values
+                    if np.any(~np.isfinite(eeg_window)):
+                        eeg_window = eeg_window[np.isfinite(eeg_window)]
+                        if len(eeg_window) == 0:
+                            eeg_window = np.random.randn(window_size) * 10
+                        elif len(eeg_window) < window_size:
+                            # Pad with mean value if needed
+                            mean_val = np.mean(eeg_window)
+                            padding = window_size - len(eeg_window)
+                            eeg_window = np.concatenate([eeg_window, np.full(padding, mean_val)])
+                except (ValueError, TypeError) as e:
+                    # Fallback to random data if conversion fails
+                    eeg_window = np.random.randn(window_size) * 10
+                    st.error(f"Data processing error: {e}")
 
                 # Interpolate for extra smoothness
                 interp_factor = 4
@@ -264,7 +306,7 @@ def main():
                 if confidence > 0.7:
                     st.success(f"## 🔥 {predicted_word}")
                 elif confidence > 0.4:
-                    st.warning(f"## ⚠ {predicted_word}")
+                    st.warning(f"## ⚠️ {predicted_word}")
                 else:
                     st.info(f"## 💭 {predicted_word}")
                 
@@ -283,9 +325,10 @@ def main():
                 prob_fig.update_layout(title="Word Probabilities", height=250)
                 st.plotly_chart(prob_fig, use_container_width=True)
             
-            # Auto-continue the simulation
-            time.sleep(1.0 / simulation_speed)
-            st.rerun()
+            # Auto-continue the simulation only if still simulating
+            if st.session_state.get('simulating', False):
+                time.sleep(0.5)  # Reduced sleep time for better performance
+                st.rerun()
     
     with tab2:
         app.impact_viz.show_impact_dashboard()
@@ -293,15 +336,15 @@ def main():
     with tab3:
         st.markdown("## 🔬 Technology Stack")
         st.markdown("""
-        ### 🏗 System Architecture
-        - *Real-time EEG Processing*: Bandpass filtering and feature extraction
-        - *AI Classification*: Deep learning model for intention recognition
-        - *Speech Synthesis*: Text-to-speech conversion
+        ### 🏗️ System Architecture
+        - **Real-time EEG Processing**: Bandpass filtering and feature extraction
+        - **AI Classification**: Deep learning model for intention recognition
+        - **Speech Synthesis**: Text-to-speech conversion
         
         ### 🤖 AI/ML Components
-        - *TensorFlow/Keras*: Neural network implementation
-        - *Scipy/Signal Processing*: EEG filtering and analysis
-        - *Plotly*: Real-time data visualization
+        - **TensorFlow/Keras**: Neural network implementation
+        - **Scipy/Signal Processing**: EEG filtering and analysis
+        - **Plotly**: Real-time data visualization
         
         ### 🎯 Medical Applications
         - Locked-in syndrome communication
